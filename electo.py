@@ -1,18 +1,19 @@
 import pandas as pd
 import time
+import sys
 
 
 class AnalyzeFeature():
 
-    def __init__(self,featureName, similarity_matrix, featureDF):
+    def __init__(self, similarity_matrix, featureDF):
         """Run electo analysis"""
 
-        featureName.sampleRankingMat = self.getSampleRanking(featureDF)
+        sampleRankingMat = self.getSampleRanking(similarity_matrix)
 
-        featureName.pos_samples, featureName.neg_samples = self.get_pos_neg(featureDF)
+        pos_samples, neg_samples = self.getPosNeg(featureDF)
 
-        featureName.posKS_distribution = self.KSdistribution(featureName.pos_samples)
-        featureName.negKS_distribution = self.KSdistribution(featureName.neg_samples)
+        posKS_distribution = self.KSdistribution(pos_samples)
+        negKS_distribution = self.KSdistribution(neg_samples)
 
 
     @staticmethod
@@ -25,12 +26,20 @@ class AnalyzeFeature():
         samples = (list(similarity_matrix.index)) #row names
         sample_ranking_mat = pd.DataFrame(index = samples) #new matrix with same row names
 
-        print("samples length", len(samples))
-
         for sample in samples:
-            #sort row, get list of ranked sample names
-            ranked_samples = (similarity_matrix.loc[sample].sort_values(ascending=False).index.tolist())
-            sample_ranking_mat[sample] = ranked_samples
+
+            #??? for some reason this sample breaks it ???
+            if sample == 'TCGA-06-0125-01A-01R-1849-01':
+                pass
+            else:
+                #sort row, get list of ranked sample names
+                data = similarity_matrix.loc[sample]
+                sorteddata = data.sort_values(ascending=False)
+                L = sorteddata.index.tolist()
+                sample_ranking_mat[sample] = L
+
+            # ranked_samples = (similarity_matrix.loc[sample].sort_values(ascending=False).index.tolist())
+            # sample_ranking_mat[sample] = ranked_samples
 
         #transform
         sample_ranking_mat = sample_ranking_mat.T
@@ -44,14 +53,14 @@ class AnalyzeFeature():
         return sample_ranking_mat
 
 
+    @staticmethod
     def getPosNeg(featureDF):
         """
         Input: Pandas DF of samples and 1's indicating positive, 0's indicating negative
         Returns list of pos and negative sample of the feature
         """
-
         pos_samples, neg_samples = [],[]
-        D = GBM_ATRX.to_dict()
+        D = featureDF.to_dict()
 
         for k,v in D.items():
             if v[0] == 0:
@@ -62,8 +71,32 @@ class AnalyzeFeature():
         return pos_samples, neg_samples
 
 
-    def KStoUniform():
-        pass
+    def KStoUniform(ranked_samples, pos_samples):
+        """
+        calculate KS test of ranks of positive samples to uniform distribution
+        input: ranked samples, names of positive samples
+        return: KS distance
+        """
+        pos_ranks = []
+
+        #getting enumerated dictionary of ranked samples to reference samples as rank index
+        rankedsampleD = {}
+        for x,y in enumerate(ranked_samples.T.values.flatten()):
+            rankedsampleD[x]=y
+
+        #getting list of positive sample rankings
+        for sample in pos_samples:
+            pos_ranks.append([key for key, val in rankedsampleD.items() if val == sample])
+
+        #flattening
+        pos_ranks = [val for sublist in pos_ranks for val in sublist]
+
+
+        ks = scipy.stats.kstest(pos_ranks,'norm', alternative='greater',N=len(ranked_samples))
+
+        return ks
+
+
 
     def KSdistribution():
         pass
@@ -71,21 +104,21 @@ class AnalyzeFeature():
     def testSeparationRaw():
         pass
 
-def GBMprep(clinical, IDmapfile, mat, snv_file):
-    ##################
-    # Data wrangling #
-    ##################
+#############
+# Functions #
+#############
+def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease, mutation):
+    """Extract needed data from given disease and mutation"""
 
     ###getting ID's of GBM patients from clinical data
-    # clinical = open("/Users/Alexis/Desktop/StuartRotation/data/clinical_out.tsv","r")
     GBM_patient_ids = []
 
-    for line in clinical:
+    for line in clinical_file:
         sline = line.split("\t")
         #header
         if sline[0] == "bcr_patient_uuid":
             continue
-        if sline[2] == "GBM":
+        if sline[2] == disease:
             GBM_patient_ids.append(sline[1])
 
     ###ID mapping - getting the different IDs for the GBM samples
@@ -116,19 +149,22 @@ def GBMprep(clinical, IDmapfile, mat, snv_file):
         else:
             GBM_snv_ids.append(snv)
 
+    print("GBM sim matrix start",time.time()-startTime)
+
     #*** this part takes about 2 minutes
     ###creating GBM similarity matrix
     # mat = pd.read_csv("/Users/Alexis/Desktop/StuartRotation/data/simMatrix.pancan.atlas.imputed.tsv", delimiter = "\t",skiprows=0, index_col=False)
-    mat = mat.set_index('sample')
+    # simMatrix = simMatrix.set_index('sample')
     GBM_sim_matrix = pd.DataFrame(index=GBM_mRNA_ids, columns=GBM_mRNA_ids)
 
     #all needed comparisons
     comp=[(GBM_mRNA_ids[i], GBM_mRNA_ids[j]) for i in xrange(len(GBM_mRNA_ids)) for j in xrange(len(GBM_mRNA_ids))]
     for c in comp:
-        GBM_sim_matrix.loc[c] = mat.loc[c]
+        GBM_sim_matrix.loc[c] = simMatrix.loc[c]
 
-    print(time.time()-startTime)
+    print("GBM sim matrix done",time.time()-startTime)
 
+    print("binary feature creation start",time.time()-startTime)
     #****takes over 4 minutes
     ### Binary Feature Creation - GBM ATRX mutations
     varianttypes = ['Frame_Shift_Del', 'Frame_Shift_Ins', 'In_Frame_Del', 'In_Frame_Ins', 'Missense_Mutation', 'Nonsense_Mutation', 'Nonstop_Mutation', 'Splice_Site', 'Translation_Start_Site']
@@ -137,35 +173,37 @@ def GBMprep(clinical, IDmapfile, mat, snv_file):
 
     for line in snv_file:
         sline = line.split("\t")
-        if sline[0]== 'ATRX':
+        if sline[0]== mutation:
             #is it a GBM sample?
             if sline[15] in GBM_snv_ids:
                 #is it an impactful type?
                 if sline[8] in varianttypes:
                     #add to matrix
                     GBM_ATRX[sline[15]] = 1
+    print("binary feature creation done",time.time()-startTime)
 
-    print(time.time()-startTime)
 
     return GBM_sim_matrix, GBM_ATRX
-
+########
+# MAIN #
+########
 def main():
     global startTime
     startTime = time.time()
 
-    clinical = open("/Users/Alexis/Desktop/StuartRotation/data/clinical_out.tsv","r")
+    clinical_file = open("/Users/Alexis/Desktop/StuartRotation/data/clinical_out.tsv","r")
     IDmapfile = open("/Users/Alexis/Desktop/StuartRotation/data/ID_mapping.tsv", "r")
-    mat = pd.read_csv("/Users/Alexis/Desktop/StuartRotation/data/simMatrix.pancan.atlas.imputed.tsv", delimiter = "\t",skiprows=0, index_col=False)
+    simMatrix = pd.read_csv("/Users/Alexis/Desktop/StuartRotation/data/simMatrix.pancan.atlas.imputed.tsv", delimiter = "\t",skiprows=0, index_col=0)
     snv_file = open("/Users/Alexis/Desktop/StuartRotation/data/snvout-2.tsv", "r")
 
-
-
     #Gathering GBM ATRX data
-    GBM_sim_matrix, GBM_ATRX = GBMprep(clinical, IDmapfile, mat, snv_file)
+    GBM_sim_matrix, GBM_ATRX = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file,"GBM", "ATRX" )
+
+    print("Starting electo...",time.time()-startTime)
 
     #Running Electo
-    AnalyzeFeature("ATRX", GBM_sim_matrix, GBM_ATRX)
+    AnalyzeFeature(GBM_sim_matrix, GBM_ATRX)
 
-    print("done",time.time()-startTime)
+    print("DONE",time.time()-startTime)
 
 if __name__ == "__main__": main()
