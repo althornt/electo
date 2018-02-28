@@ -1,7 +1,9 @@
 import pandas as pd
 import time
 import sys
-
+import scipy
+from scipy import stats
+import matplotlib.pyplot as plt
 
 class AnalyzeFeature():
 
@@ -11,10 +13,28 @@ class AnalyzeFeature():
         sampleRankingMat = self.getSampleRanking(similarity_matrix)
 
         pos_samples, neg_samples = self.getPosNeg(featureDF)
+        print(len(pos_samples),len(neg_samples))
 
-        posKS_distribution = self.KSdistribution(pos_samples)
-        negKS_distribution = self.KSdistribution(neg_samples)
+        posKS_distribution = self.KSdistribution(pos_samples,sampleRankingMat,pos_samples)
+        negKS_distribution = self.KSdistribution(neg_samples,sampleRankingMat,pos_samples)
 
+        print(posKS_distribution)
+
+        plt.hist(posKS_distribution, bins=20)
+        plt.title("Positive KS Distribution")
+        plt.savefig("/Users/Alexis/Desktop/posKSdis.png")
+
+        print(negKS_distribution)
+
+        plt.hist(negKS_distribution, bins=20)
+        plt.title("Negative KS Distribution")
+        plt.savefig("/Users/Alexis/Desktop/negKSdis.png")
+
+        #set_separation_raw
+        #histogram
+        #psuedocounts
+        #logodds ratio
+        #general priors
 
     @staticmethod
     def getSampleRanking(similarity_matrix):
@@ -70,7 +90,7 @@ class AnalyzeFeature():
 
         return pos_samples, neg_samples
 
-
+    @staticmethod
     def KStoUniform(ranked_samples, pos_samples):
         """
         calculate KS test of ranks of positive samples to uniform distribution
@@ -91,15 +111,35 @@ class AnalyzeFeature():
         #flattening
         pos_ranks = [val for sublist in pos_ranks for val in sublist]
 
+        #r ks <- suppressWarnings(ks.test(pos_ranks,"punif",1,length(ranked_samples),alternative="greater"))
 
-        ks = scipy.stats.kstest(pos_ranks,'norm', alternative='greater',N=len(ranked_samples))
+        ks = scipy.stats.kstest(pos_ranks,'uniform', alternative='greater',N=len(ranked_samples))
 
         return ks
 
+    @staticmethod
+    def KSdistribution(qsamples, sample_ranking_mat, pos_samples):
+        """
+        get KS distance for all samples in a set
+        input: sample set, the sample ranking matrix, names of positive samples
+        return: vector of KS distances
+        """
 
+        distances = []
 
-    def KSdistribution():
-        pass
+        samples = (list(sample_ranking_mat.index)) #row names
+        for sample in qsamples:
+            if sample == 'TCGA-06-0125-01A-01R-1849-01':
+                pass
+            else:
+
+                #get the rankings for this sample
+                ranked_samples = sample_ranking_mat.loc[sample]
+                ks = AnalyzeFeature.KStoUniform(ranked_samples, pos_samples)
+                #ks[0] = ks statistic
+                distances.append(ks[0])
+
+        return distances
 
     def testSeparationRaw():
         pass
@@ -122,32 +162,27 @@ def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease, mutation):
             GBM_patient_ids.append(sline[1])
 
     ###ID mapping - getting the different IDs for the GBM samples
-    # IDmapfile = open("/Users/Alexis/Desktop/StuartRotation/data/ID_mapping.tsv", "r")
-    GBM_ids = []
+    GBM_mRNA_ids = []
+    GBM_snv_ids = []
+    mRNAtoSNV = {}
+
     for line in IDmapfile:
         sline = line.split("\t")
         for sample in GBM_patient_ids:
+            #check if its a GBM sample
             if sample == sline[0]:
-                L = [sline[0],sline[1],sline[2],sline[3],sline[4],sline[5],sline[6],sline[7],sline[8]]
-                GBM_ids.append(L)
+    #             L = [sline[0],sline[1],sline[2],sline[3],sline[4],sline[5],sline[6],sline[7],sline[8]]
+                # if sline[6] != 'NA':
+                #     GBM_mRNA_ids.append(sline[6])
+                # if sline[3] != 'NA':
+                #     GBM_snv_ids.append(sline[3])
 
-    ###getting list of GBM mRNA ids
-    GBM_mRNA_ids = []
-    for l in GBM_ids:
-        mrna = l[6]
-        if mrna == 'NA':
-            pass
-        else:
-            GBM_mRNA_ids.append(mrna)
+                #must have data for both types
+                if sline[6] != 'NA' and sline[3] != 'NA':
+                    GBM_mRNA_ids.append(sline[6])
+                    GBM_snv_ids.append(sline[3])
 
-    ###getting list of GBM snv ids
-    GBM_snv_ids = []
-    for l in GBM_ids:
-        snv = l[3]
-        if snv == 'NA':
-            pass
-        else:
-            GBM_snv_ids.append(snv)
+                    mRNAtoSNV[sline[3]] = sline[6]
 
     print("GBM sim matrix start",time.time()-startTime)
 
@@ -179,9 +214,10 @@ def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease, mutation):
                 #is it an impactful type?
                 if sline[8] in varianttypes:
                     #add to matrix
-                    GBM_ATRX[sline[15]] = 1
-    print("binary feature creation done",time.time()-startTime)
+                    GBM_ATRX[mRNAtoSNV[sline[15]]] = 1
 
+
+    print("binary feature creation done",time.time()-startTime)
 
     return GBM_sim_matrix, GBM_ATRX
 ########
