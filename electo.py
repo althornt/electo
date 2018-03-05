@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import time
 import sys
 import scipy
@@ -8,31 +9,25 @@ import matplotlib.pyplot as plt
 class AnalyzeFeature():
 
     def __init__(self, similarity_matrix, featureDF):
-        """Run electo analysis"""
+        """Runs the electo analysis"""
 
         sampleRankingMat = self.getSampleRanking(similarity_matrix)
-
         pos_samples, neg_samples = self.getPosNeg(featureDF)
-        print(len(pos_samples),len(neg_samples))
 
         posKS_distribution = self.KSdistribution(pos_samples,sampleRankingMat,pos_samples)
         negKS_distribution = self.KSdistribution(neg_samples,sampleRankingMat,pos_samples)
 
-        print(posKS_distribution)
+        ks_distance, ks_pvalue, direction = self.testSeparationRaw(posKS_distribution,negKS_distribution)
+        print("ks_distance:", ks_distance, "ks_pvalue:", ks_pvalue, "direction:", direction)
 
-        plt.hist(posKS_distribution, bins=20)
-        plt.title("Positive KS Distribution")
-        plt.savefig("/Users/Alexis/Desktop/posKSdis.png")
+        """
+        posHisto, negHisto = self.makeHistograms(posKS_distribution,negKS_distribution)
+        smoothNegHisto = self.smoothHistogram(negHisto)
 
-        print(negKS_distribution)
-
-        plt.hist(negKS_distribution, bins=20)
-        plt.title("Negative KS Distribution")
-        plt.savefig("/Users/Alexis/Desktop/negKSdis.png")
-
-        #set_separation_raw
-        #histogram
-        #psuedocounts
+        pseudocounts = 2
+        posPseudoHisto = self.addPseudocounts(posHisto,pseudocounts)
+        smoothPosPsuedo = self.smoothHistogram(posPseudoHisto)
+        """
         #logodds ratio
         #general priors
 
@@ -71,7 +66,6 @@ class AnalyzeFeature():
         sample_ranking_mat = sample_ranking_mat.drop(sample_ranking_mat.columns[0], axis=1)
 
         return sample_ranking_mat
-
 
     @staticmethod
     def getPosNeg(featureDF):
@@ -113,7 +107,8 @@ class AnalyzeFeature():
 
         #r ks <- suppressWarnings(ks.test(pos_ranks,"punif",1,length(ranked_samples),alternative="greater"))
 
-        ks = scipy.stats.kstest(pos_ranks,'uniform', alternative='greater',N=len(ranked_samples))
+        # ks = scipy.stats.kstest(pos_ranks,'uniform', alternative='greater',N=len(ranked_samples))
+        ks = scipy.stats.kstest(pos_ranks, 'uniform', args=(0,len(ranked_samples)-1),alternative="greater")
 
         return ks
 
@@ -141,7 +136,110 @@ class AnalyzeFeature():
 
         return distances
 
-    def testSeparationRaw():
+    @staticmethod
+    def testSeparationRaw(posKS_distribution,negKS_distribution):
+        """ 2 sample KS test between the positive and negative raw distributions"""
+
+        ks = scipy.stats.ks_2samp(posKS_distribution,negKS_distribution)
+        ks_distance = ks[0]
+        ks_pvalue = ks[1]
+        direction = 1
+
+        return ks_distance, ks_pvalue, direction
+
+    @staticmethod
+    def makeHistograms(posKS_distribution,negKS_distribution):
+        """makes histograms from distributions"""
+
+        bins = np.linspace(0,1,20) #0 to 1 with 20 bins
+        pos_hist,pos_bins=np.histogram(posKS_distribution,bins)
+        neg_hist,neg_bins=np.histogram(negKS_distribution,bins)
+
+        """
+        print("pos_hist",pos_hist)
+        print("neg_hist",neg_hist)
+
+        plt.figure(figsize=(6,4))
+        panel1=plt.axes([0.1,0.3,.4,.333])
+        panel1.hist(pos_hist,pos_bins)
+        panel1.set_xlim(0,1)
+        plt.title("Positive KS Distribution")
+
+        panel2=plt.axes([0.55,0.3,.4,.666])
+        panel2.hist(neg_hist, neg_bins)
+        panel2.set_xlim(0,1)
+        plt.title("Negative KS Distribution")
+        plt.savefig("/Users/Alexis/Desktop/rawKSdist.png")
+        """
+
+        return pos_hist,neg_hist
+
+    @staticmethod
+    def smoothHistogram(histogram):
+        """smooth a histogram
+        input: the histogram counts, smoothing parameter alpha (defaults to 1)
+        return: smoothed histogram counts (normalized to sum up to 1)"""
+
+        counts_smoothed = []
+
+        print("histogram:")
+        print(histogram)
+
+        counts = histogram[0]
+
+        alpha = 1
+        breaks = range(20)
+        for i in range(1,20):
+            bin_ = breaks[i]
+            bin_sum = 0
+            for j in range(1,20):
+                count = counts[j-1]
+                bin2 = breaks[j]
+                distance = abs(bin_ - bin2)*20
+
+                bin_sum += (2^(-alpha*distance)*count)
+
+            counts_smoothed.append(bin_sum)
+
+        counts_smoothed = counts_smoothed/sum(counts_smoothed)
+        print(counts_smoothed)
+
+        # smoothHistogram <- function(counts, breaks = c(0:20)/20, alpha = 1){
+        #   counts_smoothed <- c()
+        #   for(i in c(2:length(breaks))){
+        #     bin <- breaks[i]
+        #     bin_sum = 0
+        #     for(j in c(2:length(breaks))){
+        #       count <- counts[j-1]
+        #       bin2 <- breaks[j]
+        #       distance = abs(bin - bin2)*20
+        #
+        #       bin_sum = bin_sum + (2^(-alpha * distance) * count)
+        #     }
+        #     counts_smoothed <- c(counts_smoothed,bin_sum)
+        #   }
+        #   counts_smoothed <- counts_smoothed/sum(counts_smoothed)
+        #   return(counts_smoothed)
+        # }
+
+        pass
+
+    @staticmethod
+    def addPseudocounts(histogram, psuedocounts):
+        """ Add psuedocounts to histogram bins"""
+
+        # addPseudocounts <- function(histogram, frequencies, pseudocounts = 10){
+        #   counts_pseudo <- c()
+        #   for(i in c(1:length(frequencies))){
+        #     base_frequency <- frequencies[i]
+        #     new_count <- histogram$counts[i] + (base_frequency * pseudocounts)
+        #     counts_pseudo <- c(counts_pseudo,new_count)
+        #   }
+        #
+        #   return(counts_pseudo)
+
+        counts_pseudo = []
+
         pass
 
 #############
