@@ -5,78 +5,79 @@ import sys
 import scipy
 from scipy import stats
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
+
 
 class AnalyzeFeature():
 
-    def __init__(self, similarity_matrix, featureDF):
+    def runAnalyze(self, feature, similarity_matrix, featureDF):
         """Runs the electo analysis"""
+
         sampleRankingMat = self.getSampleRanking(similarity_matrix)
-        pos_samples, neg_samples = self.getPosNeg(featureDF)
+        pos_samples, neg_samples = self.getPosNeg(feature, featureDF)
+
+        # print("feature",feature)
+        # print("pos_samples",len(pos_samples))
+        # print("neg_samples",len(neg_samples))
+
 
         posKS_distribution = self.KSdistribution(pos_samples,sampleRankingMat,pos_samples)
         negKS_distribution = self.KSdistribution(neg_samples,sampleRankingMat,pos_samples)
 
-        print("posKS_distribution",posKS_distribution)
-        print("negKS_distribution",negKS_distribution)
-
         ks_distance, ks_pvalue, direction = self.testSeparationRaw(posKS_distribution,negKS_distribution)
-        print("ks_distance:", ks_distance, "ks_pvalue:", ks_pvalue, "direction:", direction)
 
         posHisto, negHisto = self.makeHistograms(posKS_distribution,negKS_distribution)
-
-        # posHisto = np.array([0, 1, 1, 4, 1, 1, 0, 1, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        # negHisto = np.array([29, 44, 28, 14,  8,  2, 11,  6,  4,  2,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0])
 
         ############
         # plot raw #
         ############
+        # bins = np.linspace(0,1,21) #0 to 1 with 20 bins
+        # plt.figure(figsize=(6,4))
+        # plt.title("Raw KS Distribution",fontsize=16)
+        # plt.hist(posKS_distribution,bins,alpha=0.8, facecolor = 'yellow',label = "Positive")
+        # plt.hist(negKS_distribution,bins, alpha=0.3, facecolor = 'blue',label = "Negative")
+        # plt.legend(loc='upper right')
+        #
+        # # plt.xlim(0,1)
+        # plt.savefig("/Users/Alexis/Desktop/rawKSdist.png")
 
-        plt.figure(figsize=(6,4))
-        plt.title("Raw KS Distribution",fontsize=16)
-        plt.hist(posHisto,alpha=0.8, facecolor = 'yellow')
-        plt.hist(negHisto,alpha=0.3, facecolor = 'blue')
-        # plt.xlim(0,1)
-        plt.savefig("/Users/Alexis/Desktop/rawKSdist.png")
-
-        print("posHisto raw",posHisto)
-        print("negHisto raw",negHisto)
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
+        #############
+        # smoothing #
+        #############
         smoothNegHisto = self.smoothHistogram(negHisto)
         pseudocounts = 2
         posPseudoHisto = self.addPseudocounts(posHisto,smoothNegHisto,pseudocounts)
         smoothPosPsuedo = self.smoothHistogram(posPseudoHisto)
 
-        print("smoothNegHisto:")
-        print(smoothNegHisto)
-        print("smoothPosHisto:")
-        print(smoothPosPsuedo)
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
         #################
         # plot smoothed #
         #################
-        plt.figure(figsize=(6,4))
-        plt.title("Smoothed KS Distribution",fontsize=16)
-        plt.hist(smoothPosPsuedo,alpha=0.8, facecolor = 'yellow')
-        plt.hist(smoothNegHisto,alpha=0.3, facecolor = 'blue')
-        plt.xlim(0,1)
-        plt.savefig("/Users/Alexis/Desktop/smoothKSdist.png")
+        # plt.figure(figsize=(6,4))
+        # plt.title("Smoothed KS Distribution",fontsize=16)
+        # plt.hist(smoothPosPsuedo,alpha=0.8, facecolor = 'yellow', label = "Positive")
+        # plt.hist(smoothNegHisto,alpha=0.3, facecolor = 'blue', label = "Negative")
+        # plt.legend(loc='upper right')
+        # plt.xlim(0,1)
+        # plt.savefig("/Users/Alexis/Desktop/smoothKSdist.png")
         #################
-        """
+
         smooth_ks_distance, smooth_ks_pvalue, direction = self.testSeparation(pos_samples, neg_samples,pseudocounts,smoothPosPsuedo,smoothNegHisto)
+        # print("smooth",smooth_ks_distance, smooth_ks_pvalue)
+        #
+        #
+        # print("smooth_ks_distance",smooth_ks_distance)
+        # print("smooth_ks_pvalue",smooth_ks_pvalue)
 
-        print("smooth_ks_distance",smooth_ks_distance)
+        # log_ratios = self.calculateLogOddsRatio(smoothNegHisto,smoothPosPsuedo)
+        # general_prior = len(pos_samples)/(len(neg_samples)+len(pos_samples))
+        #
+        # probability_vector = self.calculateProbabilities(general_prior,smoothNegHisto,smoothPosPsuedo)
+        #
+        # print("probability vector:")
+        # print(probability_vector)
 
-        log_ratios = self.calculateLogOddsRatio(smoothNegHisto,smoothPosPsuedo)
-        general_prior = len(pos_samples)/(len(neg_samples)+len(pos_samples))
-
-        probability_vector = self.calculateProbabilities(general_prior,smoothNegHisto,smoothPosPsuedo)
-        print(probability_vector)
-        print("length",len(probability_vector))
-
-        #tissue priors?
-        """
+        return ks_distance, ks_pvalue, smooth_ks_distance, smooth_ks_pvalue
 
     @staticmethod
     def getSampleRanking(similarity_matrix):
@@ -115,18 +116,18 @@ class AnalyzeFeature():
         return sample_ranking_mat
 
     @staticmethod
-    def getPosNeg(featureDF):
+    def getPosNeg(feature, featureDF):
         """
         Input: Pandas DF of samples and 1's indicating positive, 0's indicating negative
         Returns list of pos and negative sample of the feature
         """
         pos_samples, neg_samples = [],[]
         D = featureDF.to_dict()
-
+        # print(D)
         for k,v in D.items():
-            if v[0] == 0:
+            if v == 0:
                 neg_samples.append(k)
-            elif v[0] == 1:
+            elif v == 1:
                 pos_samples.append(k)
 
         return pos_samples, neg_samples
@@ -201,23 +202,6 @@ class AnalyzeFeature():
         pos_hist,pos_bins=np.histogram(posKS_distribution,bins)
         neg_hist,neg_bins=np.histogram(negKS_distribution,bins)
 
-        """
-        print("pos_hist",pos_hist)
-        print("neg_hist",neg_hist)
-
-        plt.figure(figsize=(6,4))
-        panel1=plt.axes([0.1,0.3,.4,.333])
-        panel1.hist(pos_hist,pos_bins)
-        panel1.set_xlim(0,1)
-        plt.title("Positive KS Distribution")
-
-        panel2=plt.axes([0.55,0.3,.4,.666])
-        panel2.hist(neg_hist, neg_bins)
-        panel2.set_xlim(0,1)
-        plt.title("Negative KS Distribution")
-        plt.savefig("/Users/Alexis/Desktop/rawKSdist.png")
-        """
-
         return pos_hist,neg_hist
 
     @staticmethod
@@ -248,30 +232,6 @@ class AnalyzeFeature():
 
         return counts_smoothed_
 
-    """
-    smoothHistogram <- function(counts, breaks = c(0:20)/20, alpha = 1){
-
-      counts_smoothed <- c()
-      for(i in c(2:length(breaks))){
-        #count = histogram$counts[i-1]
-        bin <- breaks[i]
-
-        bin_sum = 0
-        for(j in c(2:length(breaks))){
-          count <- counts[j-1]
-          bin2 <- breaks[j]
-          distance = abs(bin - bin2)*20
-
-          bin_sum = bin_sum + (2^(-alpha * distance) * count)
-        }
-        counts_smoothed <- c(counts_smoothed,bin_sum)
-      }
-      counts_smoothed <- counts_smoothed/sum(counts_smoothed)
-      return(counts_smoothed)
-    }
-    """
-
-
     @staticmethod
     def addPseudocounts(pos_histogram, neg_smoothed, pseudocounts):
         """ Add pseudocounts to histogram bins"""
@@ -295,25 +255,16 @@ class AnalyzeFeature():
         number_pos_samples = len(pos_samples) + pseudocounts
         number_neg_samples = len(neg_samples)
 
-        breaks = range(21)
+        breaks = np.linspace(0,1,21)
 
         for i in range(len(pos_distribution)):
-            p_count = int(pos_distribution[i] * number_pos_samples)
-
-            #getting 0 ?
-            # pos_infered_data.append(runif(p_count, min=breaks[i], max=breaks[i+1]))
+            p_count = int(round(pos_distribution[i] * number_pos_samples))
             p_random = np.random.uniform(low=breaks[i], high=breaks[i+1], size=p_count)
             pos_infered_data.append(p_random.tolist())
 
             n_count = int(round(neg_distribution[i] * number_neg_samples))
-            # neg_infered_data.append(runif(n_count, min= breaks[i], max=breaks[i+1]))
             n_random = np.random.uniform(low=breaks[i], high=breaks[i+1], size=n_count)
             neg_infered_data.append(n_random.tolist())
-
-        print("pos_infered_data")
-        print(pos_infered_data)
-        print("neg_infered_data")
-        print(neg_infered_data)
 
         pos_infered_data = [item for sublist in pos_infered_data for item in sublist]
         neg_infered_data = [item for sublist in neg_infered_data for item in sublist]
@@ -323,8 +274,6 @@ class AnalyzeFeature():
         ks_distance = ks[0]
         ks_pvalue = ks[1]
         direction = 1
-            # ks_greater = suppressWarnings(ks.test(pos_infered_data,neg_infered_data,alternative="greater"))
-            # ks_less = suppressWarnings(ks.test(pos_infered_data,neg_infered_data,alternative="less"))
 
         return ks_distance, ks_pvalue, direction
 
@@ -406,7 +355,7 @@ def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease):
     #############
     # ATRX only #
     ############
-
+    """
     GBM_ATRX = pd.DataFrame(0, index = range(1), columns = GBM_mRNA_ids)
     for line in snv_file:
         sline = line.split("\t")
@@ -418,40 +367,45 @@ def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease):
                 if sline[8] in varianttypes:
                     #add to matrix
                     GBM_ATRX[mRNAtoSNV[sline[15]]] = 1
-
-
+    """
+    # for index, row in snv_file.iterrows():
+    #     if index == 'ATRX':
+    #         if row['Tumor_Sample_Barcode'] in GBM_snv_ids:
+    #             if row['Variant_Classification'] in varianttypes:
+    #                 GBM_ATRX[mRNAtoSNV[row['Tumor_Sample_Barcode']]] = 1
+    #
 
     ############
     # ALL SNVS #
     ############
-
-    """
     #initializing SNV df
     GBM_allSNVs = pd.DataFrame(columns = GBM_mRNA_ids)
 
+    append_list = []
     for line in snv_file:
         sline = line.split("\t")
-        #is it the mutation we are searching for?
-        # if sline[0]== mutation:
-        #is it a GBM sample?
+        #only GBM samples
         if sline[15] in GBM_snv_ids:
-            #is it an impactful type?
+            #only proper SNV type
             if sline[8] in varianttypes:
                 #add to matrix
-                # GBM_ATRX[mRNAtoSNV[sline[15]]] = 1
-                # s = pd.DataFrame(0, columns = GBM_mRNA_ids)
-                s = pd.DataFrame(0, index=range(1), columns=GBM_mRNA_ids)
-                s.name = sline[0]
+                s = pd.DataFrame(0, index=[sline[0]], columns=GBM_mRNA_ids)
                 s[mRNAtoSNV[sline[15]]] = 1
-                GBM_allSNVs = GBM_allSNVs.concat(s)
+                append_list.append(s)
 
-    print(GBM_allSNVs)
-    """
+    GBM_allSNVs =pd.concat(append_list)
+
+    #collapse the repeated rows ; set to max (which is 1)
+    summ = GBM_allSNVs.groupby(GBM_allSNVs.index).max()
+
+    # get rid of genes that are not mutated or only mutation in one sample
+    GBM_allSNVs = summ.loc[(summ.sum(axis=1) > 1)]
+
 
     print("binary feature creation done",time.time()-startTime)
 
-    return GBM_sim_matrix, GBM_ATRX
-    # return GBM_sim_matrix, GBM_allSNVs
+    # return GBM_sim_matrix, GBM_ATRX
+    return GBM_sim_matrix, GBM_allSNVs
 
 ########
 # MAIN #
@@ -460,34 +414,43 @@ def main():
     global startTime
     startTime = time.time()
 
-
     print("loading input files start",time.time()-startTime)
     clinical_file = open("/Users/Alexis/Desktop/StuartRotation/data/clinical_out.tsv","r")
     IDmapfile = open("/Users/Alexis/Desktop/StuartRotation/data/ID_mapping.tsv", "r")
     simMatrix = pd.read_csv("/Users/Alexis/Desktop/StuartRotation/data/simMatrix.pancan.atlas.imputed.tsv", delimiter = "\t",skiprows=0, index_col=0)
     snv_file = open("/Users/Alexis/Desktop/StuartRotation/data/snvout-2.tsv", "r")
-    # snv_file = pd.read_csv("/Users/Alexis/Desktop/StuartRotation/data/snvout-2.tsv",delimiter = "\t",skiprows=0, index_col=0,usecols=["Hugo_Symbol","Variant_Classification","Tumor_Sample_Barcode"])
-
     print("loading input files done",time.time()-startTime)
 
+    #Running Electo on ATRX only
+    # GBM_sim_matrix, GBM_ATRX = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
+    # ATRX = AnalyzeFeature()
+    # ATRX.runAnalyze(GBM_sim_matrix, GBM_ATRX)
+
+    #Gathering all GBM SNV feature data
+    GBM_sim_matrix, GBM_allSNVs = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
+
+    #get list of features in snv
+    feature_list = GBM_allSNVs.index.values.tolist()
+
+    # print(len(GBM_allSNVs))
+    # GBM_allSNVs.to_csv("/Users/Alexis/Desktop/GBM_allSNVs.csv", sep=',')
+
+    results = pd.DataFrame(columns = ["raw_ks_distance", "raw_ks_pvalue", "smooth_ks_distance", "smooth_ks_pvalue"])
 
     print("Starting electo...",time.time()-startTime)
 
-    #Running Electo on ATRX only
-    GBM_sim_matrix, GBM_ATRX = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
+    for feature in feature_list:
+        # if feature != 'MUC5B' and feature != 'TCEB3B':
+        #     print("if")
+        feature_ = AnalyzeFeature()
+        raw_ks_distance, raw_ks_pvalue, smooth_ks_distance, smooth_ks_pvalue = feature_.runAnalyze(feature, GBM_sim_matrix, GBM_allSNVs.loc[feature])
+        results[feature] = [raw_ks_distance, raw_ks_pvalue, smooth_ks_distance, smooth_ks_pvalue]
 
-    # GBM_sim_matrix, GBM_ATRX = None,None
+    results.to_csv("/Users/Alexis/Desktop/electo_results.csv", sep=',')
 
-    AnalyzeFeature(GBM_sim_matrix, GBM_ATRX)
-
-    #Gathering all GBM SNV feature data
-    # GBM_sim_matrix, GBM_allSNVs = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
-    # AnalyzeFeature(GBM_sim_matrix, GBM_allSNVs)
-
-    #get list of features in snv
-    #for feature in feature list:
-        #run AnalyzeFeature(GBM_sim_matrix, GBM_ATRX)
 
     print("DONE",time.time()-startTime)
 
 if __name__ == "__main__": main()
+       p = Pool(4)
+       # p.map(run, feature_list)
