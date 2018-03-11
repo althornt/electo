@@ -5,8 +5,8 @@ import sys
 import scipy
 from scipy import stats
 import matplotlib.pyplot as plt
-from multiprocessing import Pool
-
+# from multiprocessing import Pool
+from pathos.multiprocessing import ProcessingPool as Pool
 
 class AnalyzeFeature():
 
@@ -395,12 +395,15 @@ def GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, disease):
 
     GBM_allSNVs =pd.concat(append_list)
 
+    print("collapse start",time.time()-startTime)
     #collapse the repeated rows ; set to max (which is 1)
     summ = GBM_allSNVs.groupby(GBM_allSNVs.index).max()
+    print("collapse end",time.time()-startTime)
 
+    print("filter start",time.time()-startTime)
     # get rid of genes that are not mutated or only mutation in one sample
     GBM_allSNVs = summ.loc[(summ.sum(axis=1) > 1)]
-
+    print("filter end",time.time()-startTime)
 
     print("binary feature creation done",time.time()-startTime)
 
@@ -421,36 +424,34 @@ def main():
     snv_file = open("/Users/Alexis/Desktop/StuartRotation/data/snvout-2.tsv", "r")
     print("loading input files done",time.time()-startTime)
 
-    #Running Electo on ATRX only
-    # GBM_sim_matrix, GBM_ATRX = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
-    # ATRX = AnalyzeFeature()
-    # ATRX.runAnalyze(GBM_sim_matrix, GBM_ATRX)
-
     #Gathering all GBM SNV feature data
     GBM_sim_matrix, GBM_allSNVs = GBMprep(clinical_file, IDmapfile, simMatrix, snv_file, "GBM")
 
     #get list of features in snv
     feature_list = GBM_allSNVs.index.values.tolist()
 
-    # print(len(GBM_allSNVs))
-    # GBM_allSNVs.to_csv("/Users/Alexis/Desktop/GBM_allSNVs.csv", sep=',')
-
     results = pd.DataFrame(columns = ["raw_ks_distance", "raw_ks_pvalue", "smooth_ks_distance", "smooth_ks_pvalue"])
 
     print("Starting electo...",time.time()-startTime)
 
-    for feature in feature_list:
-        # if feature != 'MUC5B' and feature != 'TCEB3B':
-        #     print("if")
+    append_list = []
+    def runFeature(feature):
         feature_ = AnalyzeFeature()
         raw_ks_distance, raw_ks_pvalue, smooth_ks_distance, smooth_ks_pvalue = feature_.runAnalyze(feature, GBM_sim_matrix, GBM_allSNVs.loc[feature])
-        results[feature] = [raw_ks_distance, raw_ks_pvalue, smooth_ks_distance, smooth_ks_pvalue]
+        row = pd.DataFrame(index=[feature], columns=["raw_ks_distance", "raw_ks_pvalue", "smooth_ks_distance", "smooth_ks_pvalue"])
+        row["raw_ks_distance"] = raw_ks_distance
+        row["raw_ks_pvalue"] = raw_ks_pvalue
+        row["smooth_ks_distance"]= smooth_ks_distance
+        row["smooth_ks_pvalue"] = smooth_ks_pvalue
+        append_list.append(row)
 
+    p = Pool(8)
+    p.map(runFeature, feature_list)
+
+    results = pd.concat(append_list)
     results.to_csv("/Users/Alexis/Desktop/electo_results.csv", sep=',')
-
 
     print("DONE",time.time()-startTime)
 
-if __name__ == "__main__": main()
-       p = Pool(4)
-       # p.map(run, feature_list)
+if __name__ == "__main__":
+    main()
