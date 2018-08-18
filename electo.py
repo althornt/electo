@@ -5,7 +5,6 @@ import sys
 import scipy
 from scipy import stats
 import matplotlib.pyplot as plt
-# from multiprocessing import Pool
 from pathos.multiprocessing import ProcessingPool as Pool
 
 class AnalyzeFeature():
